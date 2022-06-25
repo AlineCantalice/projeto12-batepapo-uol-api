@@ -15,37 +15,50 @@ let db;
 const client = new MongoClient(process.env.MONGO_URI);
 const promise = client.connect().then(() => db = client.db('bate_papo'));
 
-app.post('/participants', (req, res) => {
+const participantSchema = joi.object({
+    name: joi.string().required().pattern(new RegExp(/(-?([A-Z].\s)?([A-Z][a-z]+)\s?)+([A-Z]'([A-Z][a-z]+))?/i))
+});
+
+app.post('/participants', async (req, res) => {
     const { name } = req.body;
 
-    const schema = joi.object().keys({
-        name: joi.string().required()
-    });
+    const participants = await db.collection('participants').find({ name: name }).toArray();
 
-    const { error, value } = schema.validate({ name: name });
+    if (participants.length > 0) {
+        return res.sendStatus(409);
+    }
+
+    const { error } = participantSchema.validate({ name: name });
 
     if (!error) {
-        db.collection('participants')
+        await db.collection('participants')
             .insertOne({
                 name: name,
                 lastStatus: Date.now()
-            }).then(res.sendStatus(201));
-        return;
+            });
+
+        await db.collection('messages')
+            .insertOne({
+                from: name,
+                to: 'Todos',
+                text: 'entra na sala...',
+                type: 'status',
+                time: dayjs().format('HH:mm:ss')
+            })
+        return res.sendStatus(201);
     }
     return res.sendStatus(422);
 });
 
-app.get('/participants', (req, res) => {
-    db.collection('participants')
-        .find().toArray().then(participants => {
-            res.send(participants)
-        })
+app.get('/participants', async (req, res) => {
+    const participants = await db.collection('participants').find().toArray();
+    return res.send(participants);
 });
 
-app.post('/messages', (req, res) => {
+app.post('/messages', async (req, res) => {
     const { to, text, type } = req.body;
     const from = req.headers.user;
-    const time = dayjs().format('HH:mm:ss')
+    const time = dayjs().format('HH:mm:ss');
 
     const schema = joi.object().keys({
         to: joi.string().required(),
@@ -54,30 +67,46 @@ app.post('/messages', (req, res) => {
         from: joi.string().valid(from)
     });
 
-    const { error, value } = schema.validate({ to: to, text: text, type: type, from: from });
+    const { error } = schema.validate({ to: to, text: text, type: type, from: from });
 
     if (!error) {
-        db.collection('messages')
+        await db.collection('messages')
             .insertOne({
                 from: from,
                 to: to,
                 text: text,
                 type: type,
                 time: time
-            }).then(res.sendStatus(201));
-        return;
+            });
+        return res.sendStatus(201);
     }
     return res.sendStatus(422);
 });
 
-app.get('/messages', (req, res) => {
-    const limit = req.query;
+app.get('/messages', async (req, res) => {
+    const limit = parseInt(req.query);
     const user = req.headers.user;
-    db.collection('messages')
-        .find().toArray().then(messages => {
-            console.log(messages)
-            res.send(messages)
-        })
+    const messages = await db.collection('messages').find().toArray();
+
+    const filteredMessages = messages.filter(me => me.type === 'message' || me.to === user || me.from === user);
+
+    if (limit && filteredMessages) {
+        const others = filteredMessages.reverse().slice(0, limit);
+        return res.send(others);
+    }
+    return res.send(filteredMessages);
+});
+
+app.post('/status', async (req, res) => {
+    const user = req.headers.user;
+    const participant = await db.collection('participants').find({ name: user }).toArray();
+    console.log(participant)
+    if (!participant) {
+        return res.sendStatus(404);
+    }
+
+    await db.collection('participants').updateOne({ name: user }, { $set: { lastStatus: Date.now() } });
+    return res.sendStatus(200);
 });
 
 app.listen(5000);
