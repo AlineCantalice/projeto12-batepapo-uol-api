@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import joi from 'joi';
 import dayjs from 'dayjs';
-import { MongoClient } from 'mongodb';
+import { MongoClient, ObjectId } from 'mongodb';
 
 dotenv.config();
 
@@ -88,7 +88,7 @@ app.get('/messages', async (req, res) => {
     const user = req.headers.user;
     const messages = await db.collection('messages').find().toArray();
 
-    const filteredMessages = messages.filter(me => me.type === 'message' || me.to === user || me.from === user);
+    const filteredMessages = messages.filter(me => me.type === 'message' || me.type === 'status' || me.to === user || me.from === user);
 
     if (limit && filteredMessages) {
         const others = filteredMessages.reverse().slice(0, limit);
@@ -100,13 +100,37 @@ app.get('/messages', async (req, res) => {
 app.post('/status', async (req, res) => {
     const user = req.headers.user;
     const participant = await db.collection('participants').find({ name: user }).toArray();
-    console.log(participant)
-    if (!participant) {
+    if (!participant || participant.length === 0) {
         return res.sendStatus(404);
     }
 
     await db.collection('participants').updateOne({ name: user }, { $set: { lastStatus: Date.now() } });
     return res.sendStatus(200);
 });
+
+setInterval(async () => {
+    try {
+        const participants = await db.collection('participants').find({}).toArray();
+
+        for (let i = 0; i < participants.length; i++) {
+            if (participants[i].lastStatus < (Date.now() + 10000)) {
+
+                const deletedMessage =
+                {
+                    to: "Todos",
+                    from: participants[i].name,
+                    text: "sai da sala...",
+                    type: "status",
+                    time: dayjs().format("HH:mm:ss")
+                }
+                await db.collection('messages').insertOne(deletedMessage);
+
+                await db.collection('participants').deleteOne({ _id: new ObjectId(participants[i]._id) });
+            }
+        }
+    } catch (e) {
+        console.log(e);
+    }
+}, 15000);
 
 app.listen(5000);
