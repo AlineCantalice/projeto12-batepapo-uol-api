@@ -188,7 +188,7 @@ setInterval(async () => {
         const participants = await db.collection('participants').find().toArray();
 
         for (let i = 0; i < participants.length; i++) {
-            if (participants[i].lastStatus <= (Date.now() + 10000)) {
+            if (participants[i].lastStatus <= (Date.now() - 10000)) {
 
                 const deletedMessage =
                 {
